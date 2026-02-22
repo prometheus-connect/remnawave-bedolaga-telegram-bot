@@ -6,6 +6,7 @@ import structlog
 from aiogram import Bot, Dispatcher
 from fastapi import FastAPI, status
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 
 from app.cabinet.routes import router as cabinet_router
@@ -103,6 +104,38 @@ def create_unified_app(
     enable_telegram_webhook: bool,
 ) -> FastAPI:
     app = _create_base_app()
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request, exc: RequestValidationError) -> JSONResponse:
+        for error in exc.errors():
+            field = str(error['loc'][-1]) if error.get('loc') else 'field'
+            error_type = error.get('type', '')
+
+            if field == 'email':
+                allowed = settings.get_email_allowed_domains()
+                if allowed:
+                    return JSONResponse(
+                        status_code=400,
+                        content={'detail': {
+                            'code': 'email_domain_not_allowed',
+                            'params': {'domains': ', '.join(sorted(allowed))},
+                        }},
+                    )
+                return JSONResponse(
+                    status_code=400,
+                    content={'detail': {'code': 'email_invalid', 'params': {}}},
+                )
+
+            if field == 'password' and 'string_too_short' in error_type:
+                return JSONResponse(
+                    status_code=400,
+                    content={'detail': {'code': 'password_too_short', 'params': {}}},
+                )
+
+        return JSONResponse(
+            status_code=400,
+            content={'detail': exc.errors()[0]['msg'] if exc.errors() else 'Validation error'},
+        )
 
     app.state.bot = bot
     app.state.dispatcher = dispatcher

@@ -710,6 +710,8 @@ class Settings(BaseSettings):
     CABINET_PASSWORD_RESET_EXPIRE_HOURS: int = 1
     CABINET_EMAIL_CHANGE_CODE_EXPIRE_MINUTES: int = 15  # Email change verification code expiration
     CABINET_EMAIL_AUTH_ENABLED: bool = True  # Enable email registration/login in cabinet
+    CABINET_EMAIL_ALLOWED_DOMAINS: str = ''  # Comma-separated whitelist of allowed email domains (empty = allow all)
+    CABINET_EMAIL_BLOCKED_DOMAINS: str = ''  # Comma-separated blacklist of blocked email domains (empty = block none)
     CABINET_URL: str = 'https://example.com/cabinet'  # Base URL for cabinet (used in verification emails)
 
     # OAuth 2.0 provider settings for cabinet
@@ -2476,6 +2478,32 @@ class Settings(BaseSettings):
 
     def is_cabinet_email_auth_enabled(self) -> bool:
         return bool(self.CABINET_EMAIL_AUTH_ENABLED)
+
+    def get_email_allowed_domains(self) -> set[str]:
+        if not self.CABINET_EMAIL_ALLOWED_DOMAINS:
+            return set()
+        return {d.strip().lower() for d in self.CABINET_EMAIL_ALLOWED_DOMAINS.split(',') if d.strip()}
+
+    def is_email_domain_allowed(self, email: str) -> bool:
+        allowed = self.get_email_allowed_domains()
+        if not allowed:
+            return True
+        domain = email.rsplit('@', 1)[-1].lower()
+        return domain in allowed
+
+    def get_email_blocked_domains(self) -> set[str]:
+        if not self.CABINET_EMAIL_BLOCKED_DOMAINS:
+            return set()
+        return {d.strip().lower() for d in self.CABINET_EMAIL_BLOCKED_DOMAINS.split(',') if d.strip()}
+
+    def is_email_domain_blocked(self, email: str) -> bool:
+        if self.get_email_allowed_domains():
+            return False
+        blocked = self.get_email_blocked_domains()
+        if not blocked:
+            return False
+        domain = email.rsplit('@', 1)[-1].lower()
+        return domain in blocked
 
     def is_smtp_configured(self) -> bool:
         # For servers without AUTH, only host and from_email are required

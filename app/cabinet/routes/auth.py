@@ -626,6 +626,27 @@ async def register_email_standalone(
             detail='Disposable email addresses are not allowed',
         )
 
+    # Check email domain blacklist
+    if settings.is_email_domain_blocked(request.email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                'code': 'email_domain_blocked',
+                'params': {},
+            },
+        )
+
+    # Check email domain whitelist
+    if not settings.is_email_domain_allowed(request.email):
+        allowed = settings.get_email_allowed_domains()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                'code': 'email_domain_not_allowed',
+                'params': {'domains': ', '.join(sorted(allowed))},
+            },
+        )
+
     # Проверить что email не занят
     existing = await db.execute(select(User).where(User.email == request.email))
     if existing.scalar_one_or_none():
@@ -673,6 +694,12 @@ async def register_email_standalone(
         user.email_verified_at = datetime.now(UTC)
         await db.commit()
         logger.info('Test email auto-verified: user_id', email=request.email, user_id=user.id)
+    elif not settings.is_cabinet_email_verification_enabled():
+        # Auto-verify when email verification is disabled
+        user.email_verified = True
+        user.email_verified_at = datetime.now(UTC)
+        await db.commit()
+        logger.info("Email auto-verified (verification disabled)", email=request.email, user_id=user.id)
     else:
         # Сгенерировать токен верификации
         verification_token = generate_verification_token()
@@ -726,10 +753,13 @@ async def register_email_standalone(
 
     # Для тестового email - сразу можно логиниться (уже verified)
     # Для обычного email - требуется верификация
+    # requires_verification=False if test email OR if verification is disabled
+    needs_verification = not is_test_email and settings.is_cabinet_email_verification_enabled()
+    msg = 'Verification email sent. Please check your inbox.' if needs_verification else 'Registration successful. You can now login.'
     return RegisterResponse(
-        message='Verification email sent. Please check your inbox.',
+        message=msg,
         email=request.email,
-        requires_verification=not is_test_email,
+        requires_verification=needs_verification,
     )
 
 
@@ -899,8 +929,8 @@ async def login_email(
             detail='Invalid email or password',
         )
 
-    # Test email bypasses verification check
-    if not user.email_verified and not is_test_email:
+    # Test email bypasses verification check; also skip when verification is disabled
+    if not user.email_verified and not is_test_email and settings.is_cabinet_email_verification_enabled():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='Please verify your email first',
