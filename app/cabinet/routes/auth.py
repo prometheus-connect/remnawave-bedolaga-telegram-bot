@@ -673,6 +673,12 @@ async def register_email_standalone(
         user.email_verified_at = datetime.now(UTC)
         await db.commit()
         logger.info('Test email auto-verified: user_id', email=request.email, user_id=user.id)
+    elif not settings.is_cabinet_email_verification_enabled():
+        # Auto-verify when email verification is disabled
+        user.email_verified = True
+        user.email_verified_at = datetime.now(UTC)
+        await db.commit()
+        logger.info("Email auto-verified (verification disabled)", email=request.email, user_id=user.id)
     else:
         # Сгенерировать токен верификации
         verification_token = generate_verification_token()
@@ -726,10 +732,13 @@ async def register_email_standalone(
 
     # Для тестового email - сразу можно логиниться (уже verified)
     # Для обычного email - требуется верификация
+    # requires_verification=False if test email OR if verification is disabled
+    needs_verification = not is_test_email and settings.is_cabinet_email_verification_enabled()
+    msg = 'Verification email sent. Please check your inbox.' if needs_verification else 'Registration successful. You can now login.'
     return RegisterResponse(
-        message='Verification email sent. Please check your inbox.',
+        message=msg,
         email=request.email,
-        requires_verification=not is_test_email,
+        requires_verification=needs_verification,
     )
 
 
@@ -899,8 +908,8 @@ async def login_email(
             detail='Invalid email or password',
         )
 
-    # Test email bypasses verification check
-    if not user.email_verified and not is_test_email:
+    # Test email bypasses verification check; also skip when verification is disabled
+    if not user.email_verified and not is_test_email and settings.is_cabinet_email_verification_enabled():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='Please verify your email first',
