@@ -154,9 +154,9 @@ def upgrade() -> None:
                 f'WHERE {column} NOT IN (SELECT id FROM users)'
             )
 
-    # Step 2: Drop old FK constraints and recreate with ON DELETE CASCADE/SET NULL
+    # Step 2: Drop old FK constraints (IF EXISTS) and recreate with ON DELETE CASCADE/SET NULL
     for table, column, ondelete, fk_name in _FK_CHANGES:
-        op.drop_constraint(fk_name, table, type_='foreignkey')
+        op.execute(f'ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {fk_name}')
         op.create_foreign_key(fk_name, table, 'users', [column], ['id'], ondelete=ondelete)
 
 
